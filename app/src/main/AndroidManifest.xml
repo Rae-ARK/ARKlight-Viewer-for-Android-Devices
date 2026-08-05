@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.ARKlightViewer">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.ARKlightViewer">
+
+            <!-- Launcher entry -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Open .ark files handed to us as a content:// URI — from a
+              file manager's "Open with", a Downloads tap, or a share
+              sheet. This is the whole point: matching happens by
+              extension via pathPattern, so there's no Content-Type
+              header from a server involved at all, and no MIME-type
+              registry gap to fall into.
+
+              Manifest pathPattern globbing is limited (pre-API 31 has
+              no literal pathSuffix), so both a broad pathPattern and a
+              modern pathSuffix are declared — Android picks whichever
+              the running OS version supports.
+            -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="content"
+                    android:host="*"
+                    android:pathPattern=".*\\.ark" />
+                <data
+                    android:scheme="file"
+                    android:host="*"
+                    android:pathPattern=".*\\.ark" />
+            </intent-filter>
+
+            <!-- API 31+: precise suffix match, no glob quirks -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:pathSuffix=".ark" />
+                <data android:scheme="file" android:pathSuffix=".ark" />
+            </intent-filter>
+
+            <!-- Fallback: sources that tag the file as application/octet-stream -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.ark" />
+            </intent-filter>
+
+        </activity>
+    </application>
+</manifest>
