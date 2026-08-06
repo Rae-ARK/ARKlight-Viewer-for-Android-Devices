@@ -21,7 +21,9 @@ import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.File
+import android.webkit.MimeTypeMap
 
 /**
  * Origin strategy (see ARCHITECTURE.md, "Origin stability"):
@@ -54,6 +56,13 @@ class MainActivity : AppCompatActivity() {
     private var siteReady = false
     private var showingFullSite = false
 
+    // Which backing the currently-open bundle's full site is using --
+    // RAM when there was headroom for it, disk otherwise. Whatever it
+    // is, it gets flushed (RAM reference dropped / disk dir deleted)
+    // as soon as we're done with it: right before extracting the next
+    // bundle, and when the activity is destroyed. See ArkBundle.flush.
+    private var currentBacking: ArkBundle.SiteBacking? = null
+
     private val openDocument =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri?.let { openArkFile(it) }
@@ -75,7 +84,7 @@ class MainActivity : AppCompatActivity() {
 
         assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/entry/", WebViewAssetLoader.InternalStoragePathHandler(this, entryDir))
-            .addPathHandler("/site/", WebViewAssetLoader.InternalStoragePathHandler(this, siteDir))
+            .addPathHandler("/site/", SitePathHandler())
             .build()
 
         webView.webViewClient = object : WebViewClient() {
@@ -95,6 +104,49 @@ class MainActivity : AppCompatActivity() {
         showingFullSite = false
         invalidateOptionsMenu()
         handleIntent(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // App's actually done with the current site now -- release
+        // whichever backing it was using (RAM reference dropped for
+        // GC, or the disk fallback directory deleted outright).
+        flushCurrentSite()
+    }
+
+    private fun flushCurrentSite() {
+        ArkBundle.flush(currentBacking)
+        currentBacking = null
+        siteReady = false
+    }
+
+    /**
+     * Serves the currently-open site's files from whichever backing
+     * [currentBacking] holds. RAM-backed sites are served straight out
+     * of the in-memory map; disk-backed ones delegate to a plain
+     * [WebViewAssetLoader.InternalStoragePathHandler] pointed at the
+     * fallback directory. Either way callers just see `/site/...`
+     * resolve under the same stable origin -- see the class doc above.
+     */
+    private inner class SitePathHandler : WebViewAssetLoader.PathHandler {
+        override fun handle(path: String): WebResourceResponse? {
+            return when (val backing = currentBacking) {
+                is ArkBundle.SiteBacking.Ram -> {
+                    val key = if (path.isEmpty()) "index.html" else path
+                    val bytes = backing.files[key] ?: return null
+                    WebResourceResponse(mimeTypeFor(key), null, ByteArrayInputStream(bytes))
+                }
+                is ArkBundle.SiteBacking.Disk ->
+                    WebViewAssetLoader.InternalStoragePathHandler(this@MainActivity, backing.dir)
+                        .handle(path)
+                null -> null
+            }
+        }
+    }
+
+    private fun mimeTypeFor(path: String): String {
+        val ext = path.substringAfterLast('.', "")
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -121,6 +173,11 @@ class MainActivity : AppCompatActivity() {
     private fun openArkFile(uri: Uri) {
         lifecycleScope.launch {
             progress.visibility = ProgressBar.VISIBLE
+
+            // Done with whatever was open before -- release its RAM
+            // or disk backing before we start pulling in the next one.
+            flushCurrentSite()
+
             val bytes = withContext(Dispatchers.IO) {
                 runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }
                     .getOrNull()
@@ -152,13 +209,18 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun tryExtractFullSite(archiveBytes: ByteArray, passphrase: String?) {
         val result = withContext(Dispatchers.IO) {
-            ArkBundle.unsealAndExtract(archiveBytes, siteDir, passphrase)
+            ArkBundle.unsealAndExtract(archiveBytes, siteDir, passphrase, applicationContext)
         }
         when (result) {
             is ArkBundle.ExtractResult.Success -> {
+                currentBacking = result.backing
                 siteReady = true
                 invalidateOptionsMenu()
-                toast("Full site ready — see \u22EE menu \u2192 Browse full site.")
+                val where = when (result.backing) {
+                    is ArkBundle.SiteBacking.Ram -> "in memory"
+                    is ArkBundle.SiteBacking.Disk -> "on disk"
+                }
+                toast("Full site ready ($where) — see \u22EE menu \u2192 Browse full site.")
             }
             is ArkBundle.ExtractResult.NeedsPassphrase -> {
                 if (passphrase == null) {

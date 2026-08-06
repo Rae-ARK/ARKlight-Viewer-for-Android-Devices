@@ -1,5 +1,6 @@
 package com.arklight.viewer
 
+import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
@@ -48,27 +49,40 @@ object ArkBundle {
         File(entryDir, "index.html").writeText(entryHtml, Charsets.UTF_8)
     }
 
+    /**
+     * Where an extracted site's files currently live. [Ram] is the
+     * preferred backing — nothing touches disk, and [flush] just drops
+     * the reference for GC. [Disk] is the fallback used when
+     * [MemoryGuard] says RAM is too tight, backed by a fixed directory
+     * under the app's own data folder (`cacheDir/ark_current/site` —
+     * see [MainActivity]) so `WebViewAssetLoader`'s origin stays
+     * constant across bundles.
+     */
+    sealed class SiteBacking {
+        data class Ram(val files: Map<String, ByteArray>) : SiteBacking()
+        data class Disk(val dir: File) : SiteBacking()
+    }
+
     sealed class ExtractResult {
-        data class Success(val dir: File) : ExtractResult()
+        data class Success(val backing: SiteBacking) : ExtractResult()
         object NeedsPassphrase : ExtractResult()
         data class Failed(val reason: String) : ExtractResult()
     }
 
     /**
-     * Unseals (if needed) and unzips the archive half into [outDir],
-     * which the caller points at a **fixed path** (e.g.
-     * `cacheDir/ark_current/site`) rather than a per-bundle hash
-     * directory. That's deliberate: `WebViewAssetLoader` binds a path
-     * handler to a directory *path* once, at `Builder` time — keeping
-     * that path constant across every opened bundle means the loader
-     * (and therefore the served origin, `https://appassets.
-     * androidplatform.net/site/`) never changes, which is what makes
-     * origin-scoped storage (`localStorage`, IndexedDB, cookies) behave
-     * consistently across different bundles instead of being silently
-     * partitioned per bundle. See ARCHITECTURE.md, "Origin stability."
-     * [outDir] is cleared before each extraction.
+     * Unseals (if needed) and unzips the archive half, preferring to
+     * hold the result entirely in RAM ([SiteBacking.Ram]) and only
+     * falling back to writing it under [outDir] ([SiteBacking.Disk])
+     * when [MemoryGuard] reports the device doesn't have comfortable
+     * headroom for that. [outDir] is only touched in the fallback
+     * case, and is cleared before each extraction into it.
      */
-    fun unsealAndExtract(archiveBytes: ByteArray, outDir: File, passphrase: String?): ExtractResult {
+    fun unsealAndExtract(
+        archiveBytes: ByteArray,
+        outDir: File,
+        passphrase: String?,
+        context: Context
+    ): ExtractResult {
         if (archiveBytes.isEmpty()) {
             return ExtractResult.Failed("no archive half present (entry-page-only bundle)")
         }
@@ -85,6 +99,60 @@ object ArkBundle {
             archiveBytes
         }
 
+        // Uncompressed HTML/CSS/JS/JSON typically runs 3-5x the
+        // compressed size; budget 6x so a bad guess only ever costs an
+        // unnecessary disk write, never a memory squeeze -- the actual
+        // safety margin is enforced inside MemoryGuard itself.
+        val estimatedUncompressed = zipBytes.size.toLong() * 6
+
+        return if (MemoryGuard.hasRamHeadroom(context, estimatedUncompressed)) {
+            extractToMemory(zipBytes)
+        } else {
+            extractToDisk(zipBytes, outDir)
+        }
+    }
+
+    /**
+     * Releases whichever backing a site is currently using. RAM just
+     * drops the reference for GC; disk is deleted outright.
+     */
+    fun flush(backing: SiteBacking?) {
+        if (backing is SiteBacking.Disk) {
+            backing.dir.deleteRecursively()
+        }
+        // Ram case: caller drops its reference to `backing`; there's
+        // nothing else holding the byte arrays, so they're GC-eligible
+        // immediately.
+    }
+
+    private fun extractToMemory(zipBytes: ByteArray): ExtractResult {
+        val files = mutableMapOf<String, ByteArray>()
+        return try {
+            ZipInputStream(zipBytes.inputStream()).use { zis ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val name = entry.name
+                        // Same zip-slip concern as the disk path: a
+                        // "../" entry isn't a legitimate site-relative
+                        // path even though it can't escape a directory
+                        // when there's no directory to escape.
+                        if (name.contains("..")) {
+                            throw SecurityException("Unsafe zip entry path: $name")
+                        }
+                        files[name] = zis.readBytes()
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            ExtractResult.Success(SiteBacking.Ram(files))
+        } catch (e: Exception) {
+            ExtractResult.Failed("bad zip once unsealed: ${e.message}")
+        }
+    }
+
+    private fun extractToDisk(zipBytes: ByteArray, outDir: File): ExtractResult {
         outDir.deleteRecursively()
         outDir.mkdirs()
 
@@ -107,7 +175,7 @@ object ArkBundle {
                     entry = zis.nextEntry
                 }
             }
-            ExtractResult.Success(outDir)
+            ExtractResult.Success(SiteBacking.Disk(outDir))
         } catch (e: Exception) {
             outDir.deleteRecursively()
             ExtractResult.Failed("bad zip once unsealed: ${e.message}")
