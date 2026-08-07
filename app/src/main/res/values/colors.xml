@@ -1,3 +1,32 @@
 <resources>
-    <color name="ic_launcher_background">#1F2933</color>
+    <!-- Brand marks: used only in the launcher icon / toolbar logo
+         drawables, not as theme color roles  —  the icon should look
+         the same regardless of light/dark/dynamic theme. -->
+    <color name="brand_gradient_start">#5FE0B5</color>
+    <color name="brand_gradient_end">#3D6EFF</color>
+
+    <!-- Fallback (non-dynamic) Material 3 color roles  —  used on
+         devices below Android 12, or when the system hasn't handed
+         out a wallpaper-derived palette. Chosen to keep proper
+         contrast: dark text/icons on light surfaces here, and the
+         mirrored light-on-dark set lives in values-night/colors.xml. -->
+    <color name="md_theme_primary">#146356</color>
+    <color name="md_theme_onPrimary">#FFFFFF</color>
+    <color name="md_theme_primaryContainer">#B7F0DD</color>
+    <color name="md_theme_onPrimaryContainer">#002016</color>
+    <color name="md_theme_secondary">#3D5AFE</color>
+    <color name="md_theme_onSecondary">#FFFFFF</color>
+    <color name="md_theme_background">#FBFDFA</color>
+    <color name="md_theme_onBackground">#191C1A</color>
+    <color name="md_theme_surface">#FBFDFA</color>
+    <color name="md_theme_onSurface">#191C1A</color>
+    <color name="md_theme_surfaceVariant">#DBE5DF</color>
+    <color name="md_theme_onSurfaceVariant">#3F4944</color>
+    <color name="md_theme_outline">#6F7975</color>
+
+    <!-- Legacy alias kept for the adaptive-icon background reference
+         in mipmap-anydpi-v26/ic_launcher.xml; superseded visually by
+         drawable/ic_launcher_background.xml's gradient, but some
+         older launchers fall back to a flat background color. -->
+    <color name="ic_launcher_background">#0F2A24</color>
 </resources>

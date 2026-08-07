@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
+import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,6 +72,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Branding toolbar (icon + "ARKlight Viewer") -- always the
+        // same regardless of which file is open. Its own child views
+        // carry the icon/wordmark, so the toolbar's built-in title
+        // stays unset; nothing here ever shows a filename.
+        val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
 
         webView = findViewById(R.id.webview)
         progress = findViewById(R.id.progress)
@@ -157,7 +165,25 @@ class MainActivity : AppCompatActivity() {
     private fun showWelcomeScreen() {
         ArkBundle.writeEntryPage(
             """
-            <html><body style="font-family:sans-serif;padding:32px;color:#1F2933">
+            <html><head><style>
+            :root { color-scheme: light dark; }
+            body {
+                font-family: sans-serif;
+                padding: 32px;
+                margin: 0;
+                color: #191C1A;
+                background: #FBFDFA;
+            }
+            code {
+                background: rgba(20,99,86,0.12);
+                padding: 2px 6px;
+                border-radius: 4px;
+            }
+            @media (prefers-color-scheme: dark) {
+                body { color: #E1E3DF; background: #191C1A; }
+                code { background: rgba(127,217,195,0.16); }
+            }
+            </style></head><body>
             <h2>ARKlight Viewer</h2>
             <p>Tap a <code>.ark</code> file anywhere on your device — Downloads,
             a file manager, a share sheet — and choose this app to open it.</p>
@@ -167,7 +193,6 @@ class MainActivity : AppCompatActivity() {
             entryDir
         )
         webView.loadUrl(ENTRY_URL)
-        title = getString(R.string.app_name)
     }
 
     private fun openArkFile(uri: Uri) {
@@ -200,7 +225,6 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { ArkBundle.writeEntryPage(split.entryHtml, entryDir) }
             showingFullSite = false
             webView.loadUrl(ENTRY_URL)
-            title = uri.lastPathSegment ?: getString(R.string.app_name)
             progress.visibility = ProgressBar.GONE
 
             tryExtractFullSite(split.archiveBytes, passphrase = null)

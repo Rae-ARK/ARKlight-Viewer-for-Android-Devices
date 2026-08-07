@@ -3,15 +3,18 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
   release:
     types: [ published ]
 
 jobs:
-  build:
+  # Fast smoke-test build on every push/PR -- debug variant only,
+  # unsigned-but-installable via the auto-generated debug keystore
+  # Gradle manages itself. Doesn't touch release signing at all.
+  build-debug:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,17 +33,98 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build APK
+      - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: arklight-viewer-apk
+          name: arklight-viewer-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+  # Release variant, with every runtime dependency (AndroidX core-ktx,
+  # AppCompat, Material, WebKit, lifecycle-runtime-ktx) resolved fresh
+  # by Gradle and compiled into the APK -- nothing pre-cached or
+  # assumed present. Only runs on main, a v* tag, manual dispatch, or
+  # a published GitHub Release, so PRs stay on the quick debug build
+  # above.
+  build-release:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # Prefer a real signing keystore from repo secrets if the repo
+      # owner has set one up (RELEASE_KEYSTORE_BASE64 + the three
+      # passwords/alias below). If those secrets aren't configured,
+      # fall back to generating a throwaway keystore on the runner so
+      # `assembleRelease` still produces a signed, installable APK for
+      # this build -- clearly NOT suitable for Play Store distribution,
+      # only for sideloading/testing this CI artifact.
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          KEYSTORE_PATH="${RUNNER_TEMP}/release.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "Using repo-provided release keystore secret."
+            echo "$KEYSTORE_B64" | base64 -d > "$KEYSTORE_PATH"
+            echo "RELEASE_KEYSTORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          else
+            echo "No RELEASE_KEYSTORE_BASE64 secret set -- generating a throwaway CI keystore."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "arklight-ci" \
+              -alias "arklight-ci" \
+              -keypass "arklight-ci" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=ARKlight Viewer CI, OU=CI, O=Rae-ARK, C=US"
+            echo "RELEASE_KEYSTORE_PASSWORD=arklight-ci" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_ALIAS=arklight-ci" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_PASSWORD=arklight-ci" >> "$GITHUB_ENV"
+          fi
+          echo "RELEASE_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        run: gradle assembleRelease --no-daemon --stacktrace
+        env:
+          RELEASE_KEYSTORE_PATH: ${{ env.RELEASE_KEYSTORE_PATH }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ env.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ env.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ env.RELEASE_KEY_PASSWORD }}
+
+      - name: Rename APK with version
+        run: |
+          VERSION=$(grep -oP '(?<=versionName = ")[^"]+' app/build.gradle.kts)
+          mkdir -p app/build/outputs/apk/release/named
+          cp app/build/outputs/apk/release/app-release.apk \
+             "app/build/outputs/apk/release/named/ARKlightViewer-v${VERSION}.apk"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: arklight-viewer-release-apk
+          path: app/build/outputs/apk/release/named/*.apk
 
       - name: Attach APK to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/release/named/*.apk

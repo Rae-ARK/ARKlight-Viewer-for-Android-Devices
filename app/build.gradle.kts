@@ -12,7 +12,25 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    // Populated from env vars that GitHub Actions exports after
+    // decoding the signing keystore (see .github/workflows/build-apk.yml).
+    // Locally, these are unset, storeFile stays null, and the release
+    // build type below just skips attaching a signingConfig -- so
+    // `./gradlew assembleRelease` still works locally, it just produces
+    // an unsigned APK you'd sign yourself before installing.
+    val releaseStorePath = System.getenv("RELEASE_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseStorePath != null) {
+            create("release") {
+                storeFile = file(releaseStorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -22,6 +40,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (releaseStorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

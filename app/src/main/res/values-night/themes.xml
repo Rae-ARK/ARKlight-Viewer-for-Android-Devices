@@ -1,17 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!--
-      Material 3, DayNight-aware, with Material You dynamic color
-      wired up via ArkViewerApplication (DynamicColors.applyToActivitiesIfAvailable).
-      On Android 12+ this gets overridden at runtime with a palette
-      derived from the user's wallpaper; everywhere else it falls
-      back to the branded teal/indigo roles defined below and mirrored
-      (light-on-dark) in values-night/themes.xml.
-
-      NoActionBar because the app bar is now a branded MaterialToolbar
-      in activity_main.xml (icon + "ARKlight Viewer", always  —  see
-      MainActivity's removal of the old per-file title) rather than
-      the system action bar.
-    -->
+    <!-- Dark-mode mirror of values/themes.xml. Same role names, dark
+         surfaces + light text/icons via values-night/colors.xml, and
+         the status/nav bars flip to light-content instead of dark. -->
     <style name="Theme.ARKlightViewer" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/md_theme_primary</item>
         <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
@@ -27,12 +17,9 @@
         <item name="colorOnSurfaceVariant">@color/md_theme_onSurfaceVariant</item>
         <item name="colorOutline">@color/md_theme_outline</item>
 
-        <!-- Status bar area is transparent and drawn through by the
-             toolbar's own surface color; icons/text stay dark since
-             this is the light variant. -->
         <item name="android:statusBarColor" tools:targetApi="21">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="23">true</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="23">false</item>
         <item name="android:navigationBarColor" tools:targetApi="27">?attr/colorSurface</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
 </resources>
